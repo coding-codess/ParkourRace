@@ -206,7 +206,7 @@ minetest.register_globalstep(function(dtime)
                 break
             end
         end
-        minetest.log("action", "[Parkour Race] Checking node for " .. player_name .. ": " .. node_name .. " at " .. minetest.pos_to_string(player_pos))
+    
 
         if data and data.start_time then
             -- Player is in a race

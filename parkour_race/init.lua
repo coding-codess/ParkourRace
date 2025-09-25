@@ -1,16 +1,39 @@
 -- Parkour Race Minigame Mod for Luanti (Minetest fork)
--- This mod allows players to participate in a parkour race with start, checkpoint, finish, and scoreboard nodes.
--- Features: Start race when moving away from start node, track time, save checkpoints, teleport on fall, display time on HUD, announce finish time, show scoreboard.
+-- This mod allows players to participate in a parkour race with start, required and optional checkpoints, finish, and scoreboard nodes.
+-- Features: Start race when moving away from start node, track time, save required and optional checkpoints, teleport on fall, display time and checkpoints on HUD, announce finish time, show scoreboard.
 
 -- Define the mod namespace
 local modname = "parkour_race"
 local modpath = minetest.get_modpath(modname)
 
--- Table to store player race data (start time, start position, checkpoint position, HUD ID, etc.)
+-- Table to store player race data (start time, start position, checkpoint lists, HUD ID, etc.)
 local player_race_data = {}
 
--- Get mod storage for persistent scoreboard data
+-- Get mod storage for persistent scoreboard and map configuration data
 local storage = minetest.get_mod_storage()
+
+-- Number of required checkpoints for the map (default to 1, adjustable via command or configuration)
+local function get_required_checkpoints_count()
+    local count = storage:get_int("required_checkpoints_count")
+    return count > 0 and count or 1 -- Default to 1 if not set
+end
+
+-- Command to set the number of required checkpoints for the map
+minetest.register_chatcommand("set_required_checkpoints", {
+    params = "<number>",
+    description = "Set the number of required checkpoints for the map",
+    privs = {server = true},
+    func = function(name, param)
+        local count = tonumber(param)
+        if count and count >= 0 then
+            storage:set_int("required_checkpoints_count", count)
+            minetest.chat_send_player(name, "Set required checkpoints to " .. count)
+            minetest.log("action", "[Parkour Race] " .. name .. " set required checkpoints to " .. count)
+        else
+            minetest.chat_send_player(name, "Invalid number. Use a non-negative integer.")
+        end
+    end
+})
 
 -- Function to format time in seconds to MM:SS.mmm (minutes, seconds, milliseconds)
 local function format_time(seconds)
@@ -86,7 +109,8 @@ local function start_race(player)
     player_race_data[player_name] = {
         start_time = os.clock(),
         start_pos = vector.round(pos),
-        checkpoint_pos = nil,
+        required_checkpoints = {}, -- List of required checkpoint positions
+        optional_checkpoints = {}, -- List of optional checkpoint positions
         hud_id = nil,
         last_node_pos = nil
     }
@@ -96,7 +120,7 @@ local function start_race(player)
         hud_elem_type = "text",
         position = { x = 0.5, y = 0.2 },
         offset = { x = 0, y = 0 },
-        text = "Time: 00:00.000",
+        text = "Time: 00:00.000 | Req CP: 0 | Opt CP: 0",
         number = 0xFFFFFF,
         alignment = { x = 0, y = 0 },
         scale = { x = 100, y = 100 }
@@ -108,18 +132,20 @@ local function start_race(player)
         minetest.log("error", "[Parkour Race] Failed to add HUD for " .. player_name)
     end
 
-    minetest.chat_send_player(player_name, "Parkour race started! Reach the finish block.")
+    local required_count = get_required_checkpoints_count()
+    minetest.chat_send_player(player_name, "Parkour race started! Reach all " .. required_count .. " required checkpoint(s) (if any) and the finish block. Optional checkpoints are bonus.")
     minetest.log("action", "[Parkour Race] Race started for " .. player_name .. " at " .. minetest.pos_to_string(pos))
 end
 
--- Function to update the HUD with elapsed time
+-- Function to update the HUD with elapsed time and checkpoint progress
 local function update_hud(player)
     local player_name = player:get_player_name()
     local data = player_race_data[player_name]
     if data and data.start_time and data.hud_id then
         local status, err = pcall(function()
             local elapsed = os.clock() - data.start_time
-            player:hud_change(data.hud_id, "text", "Time: " .. format_time(elapsed))
+            local checkpoint_text = "Req CP: " .. #data.required_checkpoints .. "/" .. get_required_checkpoints_count() .. " | Opt CP: " .. #data.optional_checkpoints
+            player:hud_change(data.hud_id, "text", "Time: " .. format_time(elapsed) .. " | " .. checkpoint_text)
         end)
         if not status then
             minetest.log("error", "[Parkour Race] HUD update failed for " .. player_name .. ": " .. err)
@@ -138,8 +164,8 @@ local function end_race(player)
 
     local elapsed = os.clock() - data.start_time
     local time_str = format_time(elapsed)
-    minetest.chat_send_all(player_name .. " finished the parkour race in " .. time_str .. "!")
-    minetest.log("action", "[Parkour Race] " .. player_name .. " finished in " .. time_str)
+    minetest.chat_send_all(player_name .. " finished the parkour race in " .. time_str .. " with " .. #data.required_checkpoints .. " required and " .. #data.optional_checkpoints .. " optional checkpoints!")
+    minetest.log("action", "[Parkour Race] " .. player_name .. " finished in " .. time_str .. " with " .. #data.required_checkpoints .. " required and " .. #data.optional_checkpoints .. " optional checkpoints")
 
     update_scoreboard(player_name, elapsed)
 
@@ -160,10 +186,18 @@ minetest.register_node(modname .. ":start_sign", {
     sounds = minetest.global_exists("default") and default.node_sound_wood_defaults() or nil,
 })
 
--- Register the Checkpoint Block node
+-- Register the Required Checkpoint Block node
 minetest.register_node(modname .. ":checkpoint_block", {
-    description = "Parkour Race Checkpoint Block",
+    description = "Parkour Race Required Checkpoint Block",
     tiles = {"default_stone.png^[colorize:#FFFF00:128"},
+    groups = {cracky = 3},
+    sounds = minetest.global_exists("default") and default.node_sound_stone_defaults() or nil
+})
+
+-- Register the Optional Checkpoint Block node
+minetest.register_node(modname .. ":optional_checkpoint_block", {
+    description = "Parkour Race Optional Checkpoint Block",
+    tiles = {"default_stone.png^[colorize:#00FFFF:128"}, -- Cyan to distinguish from required checkpoint
     groups = {cracky = 3},
     sounds = minetest.global_exists("default") and default.node_sound_stone_defaults() or nil
 })
@@ -202,33 +236,64 @@ minetest.register_globalstep(function(dtime)
             player_pos = vector.round({x = pos.x, y = pos.y + offset, z = pos.z})
             local node = minetest.get_node(player_pos)
             node_name = node.name
-            if node_name == modname .. ":start_sign" or node_name == modname .. ":checkpoint_block" or node_name == modname .. ":finish_block" then
+            if node_name == modname .. ":start_sign" or node_name == modname .. ":checkpoint_block" or node_name == modname .. ":optional_checkpoint_block" or node_name == modname .. ":finish_block" then
                 break
             end
         end
-    
 
         if data and data.start_time then
             -- Player is in a race
             update_hud(player)
 
             if pos.y < 0 then
-                local teleport_pos = data.checkpoint_pos and get_safe_teleport_pos(data.checkpoint_pos) or data.start_pos
+                -- Teleport to the last required checkpoint or start if none exist
+                local teleport_pos = (data.required_checkpoints[#data.required_checkpoints] and get_safe_teleport_pos(data.required_checkpoints[#data.required_checkpoints])) or data.start_pos
                 if teleport_pos then
                     player:set_pos(teleport_pos)
-                    minetest.chat_send_player(player_name, "Fell off! Teleported to last checkpoint.")
+                    minetest.chat_send_player(player_name, "Fell off! Teleported to last required checkpoint or start.")
                     minetest.log("action", "[Parkour Race] " .. player_name .. " fell and teleported to " .. minetest.pos_to_string(teleport_pos))
                 end
             end
 
             if not data.last_node_pos or not vector.equals(player_pos, data.last_node_pos) then
                 if node_name == modname .. ":checkpoint_block" then
-                    data.checkpoint_pos = player_pos
-                    minetest.chat_send_player(player_name, "Checkpoint reached!")
-                    minetest.log("action", "[Parkour Race] " .. player_name .. " reached checkpoint at " .. minetest.pos_to_string(player_pos))
+                    -- Check if this required checkpoint is not already in the list
+                    local is_new_checkpoint = true
+                    for _, cp_pos in ipairs(data.required_checkpoints) do
+                        if vector.equals(cp_pos, player_pos) then
+                            is_new_checkpoint = false
+                            break
+                        end
+                    end
+                    if is_new_checkpoint then
+                        table.insert(data.required_checkpoints, player_pos)
+                        minetest.chat_send_player(player_name, "Required Checkpoint reached! (" .. #data.required_checkpoints .. "/" .. get_required_checkpoints_count() .. ")")
+                        minetest.log("action", "[Parkour Race] " .. player_name .. " reached required checkpoint at " .. minetest.pos_to_string(player_pos))
+                    end
+                elseif node_name == modname .. ":optional_checkpoint_block" then
+                    -- Check if this optional checkpoint is not already in the list
+                    local is_new_checkpoint = true
+                    for _, cp_pos in ipairs(data.optional_checkpoints) do
+                        if vector.equals(cp_pos, player_pos) then
+                            is_new_checkpoint = false
+                            break
+                        end
+                    end
+                    if is_new_checkpoint then
+                        table.insert(data.optional_checkpoints, player_pos)
+                        minetest.chat_send_player(player_name, "Optional Checkpoint reached! (" .. #data.optional_checkpoints .. ")")
+                        minetest.log("action", "[Parkour Race] " .. player_name .. " reached optional checkpoint at " .. minetest.pos_to_string(player_pos))
+                    end
                 elseif node_name == modname .. ":finish_block" then
-                    minetest.log("action", "[Parkour Race] Finish block detected for " .. player_name)
-                    end_race(player)
+                    -- Check if required checkpoints exist and have been reached
+                    local required_count = get_required_checkpoints_count()
+                    if required_count > 0 and #data.required_checkpoints < required_count then
+                        minetest.chat_send_player(player_name, "You must reach all " .. required_count .. " required checkpoint(s) first! (" .. #data.required_checkpoints .. "/" .. required_count .. " reached)")
+                        minetest.log("action", "[Parkour Race] " .. player_name .. " tried to finish with only " .. #data.required_checkpoints .. "/" .. required_count .. " required checkpoints")
+                    else
+                        minetest.log("action", "[Parkour Race] Finish block detected for " .. player_name .. " with " .. #data.required_checkpoints .. " required and " .. #data.optional_checkpoints .. " optional checkpoints")
+                        end_race(player)
+                    end
                 end
                 data.last_node_pos = player_pos
             end
@@ -259,7 +324,7 @@ minetest.register_on_respawnplayer(function(player)
     local player_name = player:get_player_name()
     local data = player_race_data[player_name]
     if data and data.start_time then
-        local respawn_pos = data.checkpoint_pos and get_safe_teleport_pos(data.checkpoint_pos) or data.start_pos
+        local respawn_pos = (data.required_checkpoints[#data.required_checkpoints] and get_safe_teleport_pos(data.required_checkpoints[#data.required_checkpoints])) or data.start_pos
         if respawn_pos then
             player:set_pos(respawn_pos)
             minetest.log("action", "[Parkour Race] " .. player_name .. " respawned at " .. minetest.pos_to_string(respawn_pos))

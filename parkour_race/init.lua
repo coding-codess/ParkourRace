@@ -1,6 +1,4 @@
 -- Parkour Race Minigame for Luanti
--- Features: Start race when moving away from start node, track time, save required and optional checkpoints, teleport on fall, display time and checkpoints on HUD, announce finish time, show scoreboard.
-
 -- Define the mod namespace
 local modname = "parkour_race"
 local modpath = minetest.get_modpath(modname)
@@ -206,8 +204,15 @@ local function start_race(player)
         minetest.log("error", "[Parkour Race] Failed to add HUD for " .. player_name)
     end
 
+    -- Give the player the teleport stick
+    local inv = player:get_inventory()
+    if not inv:contains_item("main", modname .. ":teleport_stick") then
+        inv:add_item("main", modname .. ":teleport_stick")
+        minetest.log("action", "[Parkour Race] Gave teleport stick to " .. player_name)
+    end
+
     local required_count = get_required_checkpoints_count()
-    minetest.chat_send_player(player_name, "Parkour race started! Reach all " .. required_count .. " required checkpoint(s) (if any) and the finish block. Optional checkpoints are bonus.")
+    minetest.chat_send_player(player_name, "Parkour race started! Reach all " .. required_count .. " required checkpoint(s) (if any) and the finish block. Optional checkpoints are bonus. Drop or left-click the teleport stick to reset to last checkpoint.")
     minetest.log("action", "[Parkour Race] Race started for " .. player_name .. " at " .. minetest.pos_to_string(pos))
 end
 
@@ -249,7 +254,32 @@ local function end_race(player)
         end)
     end
 
+    -- Remove the teleport stick from the player's inventory
+    local inv = player:get_inventory()
+    inv:remove_item("main", modname .. ":teleport_stick")
+    minetest.log("action", "[Parkour Race] Removed teleport stick from " .. player_name .. "'s inventory")
+
     player_race_data[player_name] = nil
+end
+
+-- Function to teleport player to last checkpoint or start
+local function teleport_to_last_checkpoint(player)
+    local player_name = player:get_player_name()
+    local data = player_race_data[player_name]
+    if data and data.start_time then
+        -- Player is in a race, teleport to last required checkpoint or start position
+        local teleport_pos = (data.required_checkpoints[#data.required_checkpoints] and get_safe_teleport_pos(data.required_checkpoints[#data.required_checkpoints])) or data.start_pos
+        if teleport_pos then
+            player:set_pos(teleport_pos)
+            minetest.chat_send_player(player_name, "Teleported to last required checkpoint or start.")
+            minetest.log("action", "[Parkour Race] " .. player_name .. " teleported to " .. minetest.pos_to_string(teleport_pos))
+        else
+            minetest.chat_send_player(player_name, "Failed to find a safe teleport position.")
+            minetest.log("warning", "[Parkour Race] No safe teleport position for " .. player_name)
+        end
+    else
+        minetest.chat_send_player(player_name, "You are not in a race.")
+    end
 end
 
 -- Register the Start Sign node
@@ -293,6 +323,77 @@ minetest.register_node(modname .. ":scoreboard_sign", {
     on_rightclick = function(pos, node, player, itemstack, pointed_thing)
         minetest.show_formspec(player:get_player_name(), "parkour_race:scoreboard", get_scoreboard_formspec())
         minetest.log("action", "[Parkour Race] " .. player:get_player_name() .. " opened scoreboard")
+    end
+})
+
+-- Register the teleport stick item
+minetest.register_craftitem(modname .. ":teleport_stick", {
+    description = "Teleport Stick\nDrop or left-click to teleport to last required checkpoint or start",
+    inventory_image = "default_stick.png^[colorize:#FF00FF:128", -- Magenta-colored stick
+    stack_max = 1, -- Only one teleport stick per player
+    on_drop = function(itemstack, dropper, pos)
+        -- Handle drop action
+        local player = dropper
+        if not player or not player:is_player() then return itemstack end
+        local player_name = player:get_player_name()
+        local data = player_race_data[player_name]
+        if data and data.start_time then
+            -- Player is in a race, teleport to last required checkpoint or start position
+            local teleport_pos = (data.required_checkpoints[#data.required_checkpoints] and get_safe_teleport_pos(data.required_checkpoints[#data.required_checkpoints])) or data.start_pos
+            if teleport_pos then
+                player:set_pos(teleport_pos)
+                minetest.chat_send_player(player_name, "Dropped Teleport Stick! Teleported to last required checkpoint or start.")
+                minetest.log("action", "[Parkour Race] " .. player_name .. " dropped teleport stick and teleported to " .. minetest.pos_to_string(teleport_pos))
+                -- Keep the item in the inventory
+                return itemstack
+            else
+                minetest.chat_send_player(player_name, "Failed to find a safe teleport position.")
+                minetest.log("warning", "[Parkour Race] No safe teleport position for " .. player_name)
+                return itemstack
+            end
+        else
+            minetest.chat_send_player(player_name, "You are not in a race.")
+            return itemstack
+        end
+    end,
+    on_use = function(itemstack, user, pointed_thing)
+        -- Handle left-click action
+        local player = user
+        if not player or not player:is_player() then return itemstack end
+        local player_name = player:get_player_name()
+        local data = player_race_data[player_name]
+        if data and data.start_time then
+            -- Player is in a race, teleport to last required checkpoint or start position
+            local teleport_pos = (data.required_checkpoints[#data.required_checkpoints] and get_safe_teleport_pos(data.required_checkpoints[#data.required_checkpoints])) or data.start_pos
+            if teleport_pos then
+                player:set_pos(teleport_pos)
+                minetest.chat_send_player(player_name, "Used Teleport Stick! Teleported to last required checkpoint or start.")
+                minetest.log("action", "[Parkour Race] " .. player_name .. " used teleport stick and teleported to " .. minetest.pos_to_string(teleport_pos))
+                -- Keep the item in the inventory
+                return itemstack
+            else
+                minetest.chat_send_player(player_name, "Failed to find a safe teleport position.")
+                minetest.log("warning", "[Parkour Race] No safe teleport position for " .. player_name)
+                return itemstack
+            end
+        else
+            minetest.chat_send_player(player_name, "You are not in a race.")
+            return itemstack
+        end
+    end
+})
+
+-- Register a chat command to manually teleport to last checkpoint (for testing)
+minetest.register_chatcommand("reset", {
+    description = "Teleport to the last required checkpoint or start position during a parkour race",
+    privs = {interact = true},
+    func = function(name, param)
+        local player = minetest.get_player_by_name(name)
+        if not player then
+            return false, "Player not found."
+        end
+        teleport_to_last_checkpoint(player)
+        return true, "Teleport command executed."
     end
 })
 
@@ -411,6 +512,13 @@ end)
 -- Clean up race data when a player leaves
 minetest.register_on_leaveplayer(function(player)
     local player_name = player:get_player_name()
+    local data = player_race_data[player_name]
+    if data and data.start_time then
+        -- Remove the teleport stick from the player's inventory
+        local inv = player:get_inventory()
+        inv:remove_item("main", modname .. ":teleport_stick")
+        minetest.log("action", "[Parkour Race] Removed teleport stick from " .. player_name .. "'s inventory on leave")
+    end
     player_race_data[player_name] = nil
     minetest.log("action", "[Parkour Race] " .. player_name .. " left, race data cleared")
 end)

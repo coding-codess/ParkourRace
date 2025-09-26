@@ -9,31 +9,65 @@ local modpath = minetest.get_modpath(modname)
 -- Table to store player race data (start time, start position, checkpoint lists, HUD ID, etc.)
 local player_race_data = {}
 
--- Get mod storage for persistent scoreboard and map configuration data
+-- Get mod storage for persistent scoreboard data
 local storage = minetest.get_mod_storage()
 
--- Number of required checkpoints for the map (default to 1, adjustable via command or configuration)
-local function get_required_checkpoints_count()
-    local count = storage:get_int("required_checkpoints_count")
-    return count > 0 and count or 1 -- Default to 1 if not set
+-- Cache for required checkpoints count
+local required_checkpoints_count = 0
+
+-- Function to count required checkpoints in the map and cache the result
+local function update_required_checkpoints_count()
+    -- Define a search area centered around (-317, 10, 0) to cover the player's area
+    local world_size = 200 -- Radius to search, volume = (400^3) = 64,000,000 nodes
+    local min_pos = {x = -517, y = -190, z = -200} -- Adjusted to center around (-317, 10, 0)
+    local max_pos = {x = -117, y = 210, z = 200}
+    
+    -- Calculate volume to ensure it's within limits
+    local volume = (max_pos.x - min_pos.x) * (max_pos.y - min_pos.y) * (max_pos.z - min_pos.z)
+    if volume > 150000000 then
+        minetest.log("error", "[Parkour Race] Search area volume (" .. volume .. ") exceeds limit of 150,000,000")
+        return 0
+    end
+
+    -- Find all required checkpoint nodes in the area
+    local nodes = minetest.find_nodes_in_area(min_pos, max_pos, {modname .. ":checkpoint_block"})
+    required_checkpoints_count = #nodes
+    
+    -- Log detected checkpoints for debugging
+    if #nodes > 0 then
+        for i, pos in ipairs(nodes) do
+            minetest.log("action", "[Parkour Race] Detected required checkpoint " .. i .. " at " .. minetest.pos_to_string(pos))
+        end
+    else
+        minetest.log("warning", "[Parkour Race] No required checkpoints found in search area " .. minetest.pos_to_string(min_pos) .. " to " .. minetest.pos_to_string(max_pos))
+    end
+    
+    minetest.log("action", "[Parkour Race] Found " .. required_checkpoints_count .. " required checkpoint(s) in the map")
+    return required_checkpoints_count
 end
 
--- Command to set the number of required checkpoints for the map
-minetest.register_chatcommand("set_required_checkpoints", {
-    params = "<number>",
-    description = "Set the number of required checkpoints for the map",
-    privs = {server = true},
-    func = function(name, param)
-        local count = tonumber(param)
-        if count and count >= 0 then
-            storage:set_int("required_checkpoints_count", count)
-            minetest.chat_send_player(name, "Set required checkpoints to " .. count)
-            minetest.log("action", "[Parkour Race] " .. name .. " set required checkpoints to " .. count)
-        else
-            minetest.chat_send_player(name, "Invalid number. Use a non-negative integer.")
-        end
+-- Function to get the cached required checkpoints count
+local function get_required_checkpoints_count()
+    return required_checkpoints_count
+end
+
+-- Initialize checkpoint count when mod loads
+minetest.after(0, update_required_checkpoints_count)
+
+-- Update checkpoint count when a checkpoint block is placed or removed
+minetest.register_on_placenode(function(pos, node)
+    if node.name == modname .. ":checkpoint_block" then
+        update_required_checkpoints_count()
+        minetest.log("action", "[Parkour Race] Checkpoint placed, updated count to " .. required_checkpoints_count)
     end
-})
+end)
+
+minetest.register_on_dignode(function(pos, oldnode)
+    if oldnode.name == modname .. ":checkpoint_block" then
+        update_required_checkpoints_count()
+        minetest.log("action", "[Parkour Race] Checkpoint removed, updated count to " .. required_checkpoints_count)
+    end
+end)
 
 -- Function to format time in seconds to MM:SS.mmm (minutes, seconds, milliseconds)
 local function format_time(seconds)
@@ -117,7 +151,7 @@ local function start_race(player)
 
     -- Initialize HUD
     local hud = player:hud_add({
-        hud_elem_type = "text",
+        type = "text",
         position = { x = 0.5, y = 0.2 },
         offset = { x = 0, y = 0 },
         text = "Time: 00:00.000 | Req CP: 0 | Opt CP: 0",

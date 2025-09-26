@@ -1,12 +1,11 @@
--- Parkour Race Minigame Mod for Luanti (Minetest fork)
--- This mod allows players to participate in a parkour race with start, required and optional checkpoints, finish, and scoreboard nodes.
+-- Parkour Race Minigame for Luanti
 -- Features: Start race when moving away from start node, track time, save required and optional checkpoints, teleport on fall, display time and checkpoints on HUD, announce finish time, show scoreboard.
 
 -- Define the mod namespace
 local modname = "parkour_race"
 local modpath = minetest.get_modpath(modname)
 
--- Table to store player race data (start time, start position, checkpoint lists, HUD ID, etc.)
+-- Table to store player race data
 local player_race_data = {}
 
 -- Get mod storage for persistent scoreboard data
@@ -15,12 +14,15 @@ local storage = minetest.get_mod_storage()
 -- Cache for required checkpoints count
 local required_checkpoints_count = 0
 
+-- Flag to track if initial scan has been done
+local initial_scan_done = false
+
 -- Function to count required checkpoints in the map and cache the result
 local function update_required_checkpoints_count()
-    -- Define a search area centered around (-317, 10, 0) to cover the player's area
+    -- Define a search area centered around (-317, 8, 0) to cover the provided coordinates
     local world_size = 200 -- Radius to search, volume = (400^3) = 64,000,000 nodes
-    local min_pos = {x = -517, y = -190, z = -200} -- Adjusted to center around (-317, 10, 0)
-    local max_pos = {x = -117, y = 210, z = 200}
+    local min_pos = {x = -517, y = -192, z = -200} -- Adjusted to center around (-317, 8, 0)
+    local max_pos = {x = -117, y = 208, z = 200}
     
     -- Calculate volume to ensure it's within limits
     local volume = (max_pos.x - min_pos.x) * (max_pos.y - min_pos.y) * (max_pos.z - min_pos.z)
@@ -28,6 +30,22 @@ local function update_required_checkpoints_count()
         minetest.log("error", "[Parkour Race] Search area volume (" .. volume .. ") exceeds limit of 150,000,000")
         return 0
     end
+
+    -- Force load map chunks in the search area
+    local min_block = vector.divide(min_pos, 16):floor()
+    local max_block = vector.divide(max_pos, 16):floor()
+    local loaded_blocks = {}
+    for x = min_block.x, max_block.x do
+        for y = min_block.y, max_block.y do
+            for z = min_block.z, max_block.z do
+                local block_pos = {x=x, y=y, z=z}
+                if minetest.forceload_block(block_pos, true) then
+                    table.insert(loaded_blocks, minetest.pos_to_string(block_pos))
+                end
+            end
+        end
+    end
+    minetest.log("action", "[Parkour Race] Force-loaded blocks: " .. table.concat(loaded_blocks, ", "))
 
     -- Find all required checkpoint nodes in the area
     local nodes = minetest.find_nodes_in_area(min_pos, max_pos, {modname .. ":checkpoint_block"})
@@ -40,9 +58,23 @@ local function update_required_checkpoints_count()
         end
     else
         minetest.log("warning", "[Parkour Race] No required checkpoints found in search area " .. minetest.pos_to_string(min_pos) .. " to " .. minetest.pos_to_string(max_pos))
+        -- Debug: Check if the specific checkpoint node exists
+        local test_pos = {x=-317, y=8, z=5}
+        local node = minetest.get_node(test_pos)
+        minetest.log("action", "[Parkour Race] Node at checkpoint position " .. minetest.pos_to_string(test_pos) .. " is " .. node.name)
     end
     
     minetest.log("action", "[Parkour Race] Found " .. required_checkpoints_count .. " required checkpoint(s) in the map")
+    
+    -- Free forceloaded blocks after scanning
+    for x = min_block.x, max_block.x do
+        for y = min_block.y, max_block.y do
+            for z = min_block.z, max_block.z do
+                minetest.forceload_free_block({x=x, y=y, z=z}, true)
+            end
+        end
+    end
+
     return required_checkpoints_count
 end
 
@@ -51,8 +83,16 @@ local function get_required_checkpoints_count()
     return required_checkpoints_count
 end
 
--- Initialize checkpoint count when mod loads
-minetest.after(0, update_required_checkpoints_count)
+-- Trigger checkpoint scan when the first player joins, with a short delay
+minetest.register_on_joinplayer(function(player)
+    if not initial_scan_done then
+        minetest.after(1, function()
+            update_required_checkpoints_count()
+            initial_scan_done = true
+            minetest.log("action", "[Parkour Race] Initial checkpoint scan triggered by player join: " .. player:get_player_name())
+        end)
+    end
+end)
 
 -- Update checkpoint count when a checkpoint block is placed or removed
 minetest.register_on_placenode(function(pos, node)
@@ -69,7 +109,7 @@ minetest.register_on_dignode(function(pos, oldnode)
     end
 end)
 
--- Function to format time in seconds to MM:SS.mmm (minutes, seconds, milliseconds)
+-- Function to format time in seconds to MM:SS.mmm
 local function format_time(seconds)
     local minutes = math.floor(seconds / 60)
     local secs = math.floor(seconds % 60)
@@ -77,7 +117,7 @@ local function format_time(seconds)
     return string.format("%02d:%02d.%03d", minutes, secs, millis)
 end
 
--- Function to get a safe teleport position (on top of the block)
+-- Function to get a safe teleport position
 local function get_safe_teleport_pos(pos)
     if not pos then return nil end
     local safe_pos = vector.new(pos.x, pos.y + 1, pos.z)

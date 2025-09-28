@@ -1,4 +1,4 @@
--- Parkour Race Minigame for Luanti
+-- Parkour Race Minigame for Minetest
 -- Define the mod namespace
 local modname = "parkour_race"
 local modpath = minetest.get_modpath(modname)
@@ -124,20 +124,20 @@ local function get_safe_teleport_pos(pos)
     return nil
 end
 
--- Function to update the singleplayer scoreboard with a player's completion time
-local function update_singleplayer_scoreboard(player_name, time)
-    local scoreboard = storage:get_string("singleplayer_scoreboard")
+-- Function to update the scoreboard with a player's completion time
+local function update_scoreboard(player_name, time)
+    local scoreboard = storage:get_string("scoreboard")
     scoreboard = scoreboard ~= "" and minetest.deserialize(scoreboard) or {}
     if not scoreboard[player_name] or time < scoreboard[player_name] then
         scoreboard[player_name] = time
-        storage:set_string("singleplayer_scoreboard", minetest.serialize(scoreboard))
-        minetest.log("action", "[Parkour Race] Updated singleplayer scoreboard for " .. player_name .. " with time " .. format_time(time))
+        storage:set_string("scoreboard", minetest.serialize(scoreboard))
+        minetest.log("action", "[Parkour Race] Updated scoreboard for " .. player_name .. " with time " .. format_time(time))
     end
 end
 
--- Function to get the top 5 singleplayer scoreboard entries as a formspec table
-local function get_singleplayer_scoreboard_formspec()
-    local scoreboard = storage:get_string("singleplayer_scoreboard")
+-- Function to get the top 5 scoreboard entries as a formspec table
+local function get_scoreboard_formspec()
+    local scoreboard = storage:get_string("scoreboard")
     scoreboard = scoreboard ~= "" and minetest.deserialize(scoreboard) or {}
     local sorted_scores = {}
     for name, time in pairs(scoreboard) do
@@ -147,7 +147,7 @@ local function get_singleplayer_scoreboard_formspec()
     local formspec = {
         "formspec_version[4]",
         "size[6,8]",
-        "label[0.5,0.5;Singleplayer Parkour Race Scoreboard]",
+        "label[0.5,0.5;#0000FFParkour Race Scoreboard]", -- Blue label
         "tablecolumns[text;text]",
         "table[0.5,1;5,6;scoreboard;"
     }
@@ -165,9 +165,9 @@ local function get_singleplayer_scoreboard_formspec()
     return table.concat(formspec)
 end
 
--- Function to reset the singleplayer leaderboard and announce the winner
-local function reset_singleplayer_leaderboard()
-    local scoreboard = storage:get_string("singleplayer_scoreboard")
+-- Function to reset the leaderboard and announce the winner
+local function reset_leaderboard()
+    local scoreboard = storage:get_string("scoreboard")
     scoreboard = scoreboard ~= "" and minetest.deserialize(scoreboard) or {}
     local winner_name, winner_time = nil, nil
     for name, time in pairs(scoreboard) do
@@ -179,54 +179,54 @@ local function reset_singleplayer_leaderboard()
 
     -- Announce winner
     if winner_name and winner_time then
-        minetest.chat_send_all("Daily Singleplayer Parkour Race Winner: " .. winner_name .. " with time " .. format_time(winner_time) .. "!")
-        minetest.log("action", "[Parkour Race] Daily singleplayer winner: " .. winner_name .. " with time " .. format_time(winner_time))
+        minetest.chat_send_all(minetest.colorize("#0000FF", "Daily Parkour Race Winner: ") .. minetest.colorize("#FFFFFF", winner_name) .. minetest.colorize("#0000FF", " with time ") .. minetest.colorize("#FFFFFF", format_time(winner_time)) .. minetest.colorize("#0000FF", "!"))
+        minetest.log("action", "[Parkour Race] Daily winner: " .. winner_name .. " with time " .. format_time(winner_time))
 
         -- Store historical winner
-        local winners = storage:get_string("singleplayer_winners")
+        local winners = storage:get_string("winners")
         winners = winners ~= "" and minetest.deserialize(winners) or {}
         table.insert(winners, {
             name = winner_name,
             time = winner_time,
             timestamp = os.time()
         })
-        storage:set_string("singleplayer_winners", minetest.serialize(winners))
+        storage:set_string("winners", minetest.serialize(winners))
     else
-        minetest.chat_send_all("No winner for today's Singleplayer Parkour Race.")
-        minetest.log("action", "[Parkour Race] No singleplayer winner for today")
+        minetest.chat_send_all(minetest.colorize("#0000FF", "No winner for today's Parkour Race."))
+        minetest.log("action", "[Parkour Race] No winner for today")
     end
 
     -- Reset the leaderboard
-    storage:set_string("singleplayer_scoreboard", "")
-    minetest.log("action", "[Parkour Race] Singleplayer leaderboard reset")
+    storage:set_string("scoreboard", "")
+    minetest.log("action", "[Parkour Race] Leaderboard reset")
 end
 
--- Function to check and schedule daily reset at 12 PM UTC
+-- Function to check and schedule daily reset at 6 PM UTC
 local function schedule_leaderboard_reset()
     local now = os.time()
     local utc = os.date("!*t", now)
-    local seconds_until_midday = ((24 - utc.hour) % 24) * 3600 - utc.min * 60 - utc.sec
-    if utc.hour >= 12 then
-        seconds_until_midday = seconds_until_midday + 24 * 3600
+    local seconds_until_six_pm = ((18 - utc.hour) % 24) * 3600 - utc.min * 60 - utc.sec
+    if utc.hour >= 18 then
+        seconds_until_six_pm = seconds_until_six_pm + 24 * 3600
     end
-    minetest.after(seconds_until_midday, function()
-        reset_singleplayer_leaderboard()
+    minetest.after(seconds_until_six_pm, function()
+        reset_leaderboard()
         -- Schedule next reset
         minetest.after(24 * 3600, schedule_leaderboard_reset)
     end)
-    minetest.log("action", "[Parkour Race] Scheduled singleplayer leaderboard reset in " .. seconds_until_midday .. " seconds")
+    minetest.log("action", "[Parkour Race] Scheduled leaderboard reset in " .. seconds_until_six_pm .. " seconds")
 end
 
 -- Start the reset scheduler when mod loads
 minetest.after(0, schedule_leaderboard_reset)
 
--- Command to manually reset the singleplayer leaderboard
+-- Command to manually reset the leaderboard
 minetest.register_chatcommand("reset_leaderboard", {
-    description = "Manually reset the singleplayer parkour race leaderboard",
+    description = "Manually reset the parkour race leaderboard",
     privs = {server = true}, -- Requires admin privileges
     func = function(name, param)
-        reset_singleplayer_leaderboard()
-        return true, "Singleplayer leaderboard has been reset."
+        reset_leaderboard()
+        return true, minetest.colorize("#0000FF", "Leaderboard has been reset.")
     end
 })
 
@@ -239,9 +239,9 @@ local function start_race(player, start_pos)
     -- Initialize race data
     player_race_data[player_name] = {
         start_time = os.clock(),
-        start_pos = start_pos, -- Use provided start_pos
-        checkpoints = {}, -- Unified list: {pos=vector, type="required"/"optional", seq=number}
-        checkpoint_seq = 0, -- Sequence counter for checkpoints
+        start_pos = start_pos,
+        checkpoints = {},
+        checkpoint_seq = 0,
         hud_id = nil,
         last_node_pos = nil
     }
@@ -249,10 +249,10 @@ local function start_race(player, start_pos)
     -- Initialize HUD
     local hud = player:hud_add({
         type = "text",
-        position = { x = 0.5, y = 0.2 },
-        offset = { x = 0, y = 0 },
-        text = "Time: 00:00.000 | Req CP: 0 | Opt CP: 0",
-        number = 0xFFFFFF,
+        position = { x = 0.5, y = 0.9 },
+        offset = { x = 0, y = -60 },
+        text = "Time: 00:00.000 | CP: 0",
+        number = FFA500,
         alignment = { x = 0, y = 0 },
         scale = { x = 100, y = 100 }
     })
@@ -271,8 +271,8 @@ local function start_race(player, start_pos)
     end
 
     local required_count = get_required_checkpoints_count()
-    minetest.chat_send_player(player_name, "Singleplayer parkour race started! Reach all " .. required_count .. " required checkpoint(s) (if any) and the finish block. Optional checkpoints are bonus. Drop or left-click the teleport stick to reset to last checkpoint.")
-    minetest.log("action", "[Parkour Race] Singleplayer race started for " .. player_name .. " at " .. minetest.pos_to_string(pos))
+    minetest.chat_send_player(player_name, minetest.colorize("#FFA500", "Parkour race started! Reach all ") .. minetest.colorize("#FFFFFF", required_count) .. minetest.colorize("#FFA500", " required checkpoint(s) and the finish block. Optional checkpoints are bonus. Drop or left-click the teleport stick to reset to ") .. minetest.colorize("#FFA500", "last checkpoint") .. minetest.colorize("#FFA500", "."))
+    minetest.log("action", "[Parkour Race] Race started for " .. player_name .. " at " .. minetest.pos_to_string(pos))
 end
 
 -- Function to update the HUD with elapsed time and checkpoint progress
@@ -321,10 +321,10 @@ local function end_race(player)
 
     local elapsed = os.clock() - data.start_time
     local time_str = format_time(elapsed)
-    minetest.chat_send_all(player_name .. " finished the singleplayer parkour race in " .. time_str .. " with " .. req_count .. " required and " .. opt_count .. " optional checkpoints!")
-    minetest.log("action", "[Parkour Race] " .. player_name .. " finished singleplayer race in " .. time_str .. " with " .. req_count .. " required and " .. opt_count .. " optional checkpoints")
+    minetest.chat_send_all(minetest.colorize("#FFFF00", player_name ) .. minetest.colorize("#FFA500"," finished the parkour race in " ) .. minetest.colorize("#FFFFFF", time_str) .. minetest.colorize("#FFA500", "!"))
+    minetest.log("action", "[Parkour Race] " .. player_name .. " finished race in " .. time_str .. " with " .. req_count .. " required and " .. opt_count .. " optional checkpoints")
 
-    update_singleplayer_scoreboard(player_name, elapsed)
+    update_scoreboard(player_name, elapsed)
 
     if data.hud_id then
         pcall(function()
@@ -363,20 +363,20 @@ local function teleport_to_last_checkpoint(player)
         if teleport_pos then
             player:set_pos(teleport_pos)
             local destination = last_checkpoint and "last checkpoint" or "start"
-            minetest.chat_send_player(player_name, "Teleported to " .. destination .. ".")
+            minetest.chat_send_player(player_name, minetest.colorize("#90ee90", "Teleported to ") .. minetest.colorize("#90ee90", destination) .. minetest.colorize("#90ee90", "."))
             minetest.log("action", "[Parkour Race] " .. player_name .. " teleported to " .. destination .. " at " .. minetest.pos_to_string(teleport_pos))
         else
-            minetest.chat_send_player(player_name, "Failed to find a safe teleport position.")
+            minetest.chat_send_player(player_name, minetest.colorize("#FFA500", "Failed to find a safe teleport position."))
             minetest.log("warning", "[Parkour Race] No safe teleport position for " .. player_name)
         end
     else
-        minetest.chat_send_player(player_name, "You are not in a race.")
+        minetest.chat_send_player(player_name, minetest.colorize("#FFA500", "You are not in a race."))
     end
 end
 
 -- Register the Start Sign node
 minetest.register_node(modname .. ":start_sign", {
-    description = "Singleplayer Parkour Race Start Sign",
+    description = "Parkour Race Start Sign",
     tiles = {"default_sign_wall_wood.png^[colorize:#00FF00:128"},
     groups = {choppy = 2, oddly_breakable_by_hand = 2},
     sounds = minetest.global_exists("default") and default.node_sound_wood_defaults() or nil,
@@ -384,7 +384,7 @@ minetest.register_node(modname .. ":start_sign", {
 
 -- Register the Required Checkpoint Block node
 minetest.register_node(modname .. ":checkpoint_block", {
-    description = "Singleplayer Parkour Race Required Checkpoint Block",
+    description = "Parkour Race Required Checkpoint Block",
     tiles = {"default_stone.png^[colorize:#FFFF00:128"},
     groups = {cracky = 3},
     sounds = minetest.global_exists("default") and default.node_sound_stone_defaults() or nil
@@ -392,7 +392,7 @@ minetest.register_node(modname .. ":checkpoint_block", {
 
 -- Register the Optional Checkpoint Block node
 minetest.register_node(modname .. ":optional_checkpoint_block", {
-    description = "Singleplayer Parkour Race Optional Checkpoint Block",
+    description = "Parkour Race Optional Checkpoint Block",
     tiles = {"default_stone.png^[colorize:#00FFFF:128"},
     groups = {cracky = 3},
     sounds = minetest.global_exists("default") and default.node_sound_stone_defaults() or nil
@@ -400,7 +400,7 @@ minetest.register_node(modname .. ":optional_checkpoint_block", {
 
 -- Register the Finish Block node
 minetest.register_node(modname .. ":finish_block", {
-    description = "Singleplayer Parkour Race Finish Block",
+    description = "Parkour Race Finish Block",
     tiles = {"default_stone.png^[colorize:#FF0000:128"},
     groups = {cracky = 3},
     sounds = minetest.global_exists("default") and default.node_sound_stone_defaults() or nil
@@ -408,13 +408,13 @@ minetest.register_node(modname .. ":finish_block", {
 
 -- Register the Scoreboard Sign node
 minetest.register_node(modname .. ":scoreboard_sign", {
-    description = "Singleplayer Parkour Race Scoreboard Sign",
+    description = "Parkour Race Scoreboard Sign",
     tiles = {"default_sign_wall_wood.png^[colorize:#0000FF:128"},
     groups = {choppy = 2, oddly_breakable_by_hand = 2},
     sounds = minetest.global_exists("default") and default.node_sound_wood_defaults() or nil,
     on_rightclick = function(pos, node, player, itemstack, pointed_thing)
-        minetest.show_formspec(player:get_player_name(), "parkour_race:scoreboard", get_singleplayer_scoreboard_formspec())
-        minetest.log("action", "[Parkour Race] " .. player:get_player_name() .. " opened singleplayer scoreboard")
+        minetest.show_formspec(player:get_player_name(), "parkour_race:scoreboard", get_scoreboard_formspec())
+        minetest.log("action", "[Parkour Race] " .. player:get_player_name() .. " opened scoreboard")
     end
 })
 
@@ -444,10 +444,10 @@ minetest.register_chatcommand("reset", {
     func = function(name, param)
         local player = minetest.get_player_by_name(name)
         if not player then
-            return false, "Player not found."
+            return false, minetest.colorize("#FFA500", "Player not found.")
         end
         teleport_to_last_checkpoint(player)
-        return true, "Teleport command executed."
+        return true, minetest.colorize("#FF00FF", "Teleport command executed.")
     end
 })
 
@@ -480,10 +480,10 @@ minetest.register_globalstep(function(dtime)
                 if teleport_pos then
                     player:set_pos(teleport_pos)
                     local destination = get_last_checkpoint(data) and "last checkpoint" or "start"
-                    minetest.chat_send_player(player_name, "Fell off! Teleported to " .. destination .. ".")
+                    minetest.chat_send_player(player_name, minetest.colorize("#90ee90", "Fell off! Teleported to ") .. minetest.colorize("#90ee90", destination) .. minetest.colorize("#90ee90", "."))
                     minetest.log("action", "[Parkour Race] " .. player_name .. " fell and teleported to " .. destination .. " at " .. minetest.pos_to_string(teleport_pos))
                 else
-                    minetest.chat_send_player(player_name, "Failed to find a safe teleport position.")
+                    minetest.chat_send_player(player_name, minetest.colorize("#FFA500", "Failed to find a safe teleport position."))
                     minetest.log("warning", "[Parkour Race] No safe teleport position for " .. player_name)
                 end
             end
@@ -504,7 +504,7 @@ minetest.register_globalstep(function(dtime)
                         for _, cp in ipairs(data.checkpoints) do
                             if cp.type == "required" then req_count = req_count + 1 end
                         end
-                        minetest.chat_send_player(player_name, "Required Checkpoint reached! (" .. req_count .. "/" .. get_required_checkpoints_count() .. ")")
+                        minetest.chat_send_player(player_name, minetest.colorize("#FFFF00", "Checkpoint reached! (") .. minetest.colorize("#FFFFFF", req_count .. "/" .. get_required_checkpoints_count()) .. minetest.colorize("#FFFF00", ")"))
                         minetest.log("action", "[Parkour Race] " .. player_name .. " reached required checkpoint at " .. minetest.pos_to_string(player_pos) .. " (seq: " .. data.checkpoint_seq .. ")")
                     end
                 elseif node_name == modname .. ":optional_checkpoint_block" then
@@ -522,7 +522,7 @@ minetest.register_globalstep(function(dtime)
                         for _, cp in ipairs(data.checkpoints) do
                             if cp.type == "optional" then opt_count = opt_count + 1 end
                         end
-                        minetest.chat_send_player(player_name, "Optional Checkpoint reached! (" .. opt_count .. ")")
+                        minetest.chat_send_player(player_name, minetest.colorize("#add8e6", "Optional Checkpoint reached! (") .. minetest.colorize("#FFFFFF", opt_count) .. minetest.colorize("#add8e6", ")"))
                         minetest.log("action", "[Parkour Race] " .. player_name .. " reached optional checkpoint at " .. minetest.pos_to_string(player_pos) .. " (seq: " .. data.checkpoint_seq .. ")")
                     end
                 elseif node_name == modname .. ":finish_block" then
@@ -532,7 +532,7 @@ minetest.register_globalstep(function(dtime)
                     end
                     local required_count = get_required_checkpoints_count()
                     if required_count > 0 and req_count < required_count then
-                        minetest.chat_send_player(player_name, "You must reach all " .. required_count .. " required checkpoint(s) first! (" .. req_count .. "/" .. required_count .. " reached)")
+                        minetest.chat_send_player(player_name, minetest.colorize("#FFA500", "You must reach all ") .. minetest.colorize("#FFFFFF", required_count) .. minetest.colorize("#FFA500", " required checkpoint(s) first! (") .. minetest.colorize("#FFFFFF", req_count .. "/" .. required_count) .. minetest.colorize("#FFA500", " reached)"))
                         minetest.log("action", "[Parkour Race] " .. player_name .. " tried to finish with only " .. req_count .. "/" .. required_count .. " required checkpoints")
                     else
                         local opt_count = 0
@@ -553,13 +553,13 @@ minetest.register_globalstep(function(dtime)
                         start_pos = node_pos,
                         last_node_pos = player_pos
                     }
-                    minetest.chat_send_player(player_name, "Stand on the start sign and move away to begin the singleplayer race!")
+                    minetest.chat_send_player(player_name, minetest.colorize("#90ee90", "Move away from the ") .. minetest.colorize("#90ee90", "start") .. minetest.colorize("#90ee90", " to begin the race!"))
                     minetest.log("action", "[Parkour Race] " .. player_name .. " on start node at " .. minetest.pos_to_string(node_pos))
                 end
             elseif data and data.on_start_node then
                 local start_pos = data.start_pos -- Preserve start_pos
                 player_race_data[player_name] = nil
-                minetest.log("action", "[Parkour Race] " .. player_name .. " moved off start node, starting singleplayer race")
+                minetest.log("action", "[Parkour Race] " .. player_name .. " moved off start node, starting race")
                 start_race(player, start_pos) -- Pass start_pos to start_race
             end
         end
@@ -575,8 +575,12 @@ minetest.register_on_respawnplayer(function(player)
         if respawn_pos then
             player:set_pos(respawn_pos)
             local destination = get_last_checkpoint(data) and "last checkpoint" or "start"
+            minetest.chat_send_player(player_name, minetest.colorize("#FF00FF", "Respawned at ") .. minetest.colorize("#FFFFFF", destination) .. minetest.colorize("#FF00FF", "."))
             minetest.log("action", "[Parkour Race] " .. player_name .. " respawned at " .. destination .. " at " .. minetest.pos_to_string(respawn_pos))
             return true
+        else
+            minetest.chat_send_player(player_name, minetest.colorize("#FFA500", "Failed to find a safe respawn position."))
+            minetest.log("warning", "[Parkour Race] No safe respawn position for " .. player_name)
         end
     end
     return false
@@ -596,4 +600,4 @@ minetest.register_on_leaveplayer(function(player)
 end)
 
 -- Log mod initialization
-minetest.log("action", "[Parkour Race] Singleplayer mod loaded")
+minetest.log("action", "[Parkour Race] Mod loaded")

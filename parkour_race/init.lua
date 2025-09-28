@@ -147,7 +147,7 @@ local function get_scoreboard_formspec()
     local formspec = {
         "formspec_version[4]",
         "size[6,8]",
-        "label[0.5,0.5;#0000FFParkour Race Scoreboard]", -- Blue label
+        "label[0.5,0.5;Parkour Race Scoreboard]",
         "tablecolumns[text;text]",
         "table[0.5,1;5,6;scoreboard;"
     }
@@ -179,7 +179,7 @@ local function reset_leaderboard()
 
     -- Announce winner
     if winner_name and winner_time then
-        minetest.chat_send_all(minetest.colorize("#0000FF", "Daily Parkour Race Winner: ") .. minetest.colorize("#FFFFFF", winner_name) .. minetest.colorize("#0000FF", " with time ") .. minetest.colorize("#FFFFFF", format_time(winner_time)) .. minetest.colorize("#0000FF", "!"))
+        minetest.chat_send_all(minetest.colorize("#FFA500", "Daily Parkour Race Winner: ") .. minetest.colorize("#FFFFFF", winner_name) .. minetest.colorize("#FFA500", " with time ") .. minetest.colorize("#FFFFFF", format_time(winner_time)) .. minetest.colorize("#FFA500", "!"))
         minetest.log("action", "[Parkour Race] Daily winner: " .. winner_name .. " with time " .. format_time(winner_time))
 
         -- Store historical winner
@@ -192,7 +192,7 @@ local function reset_leaderboard()
         })
         storage:set_string("winners", minetest.serialize(winners))
     else
-        minetest.chat_send_all(minetest.colorize("#0000FF", "No winner for today's Parkour Race."))
+        minetest.chat_send_all(minetest.colorize("#FFA500", "No winner for today's Parkour Race."))
         minetest.log("action", "[Parkour Race] No winner for today")
     end
 
@@ -226,7 +226,7 @@ minetest.register_chatcommand("reset_leaderboard", {
     privs = {server = true}, -- Requires admin privileges
     func = function(name, param)
         reset_leaderboard()
-        return true, minetest.colorize("#0000FF", "Leaderboard has been reset.")
+        return true, minetest.colorize("#f55f5f", "Leaderboard has been reset.")
     end
 })
 
@@ -242,26 +242,63 @@ local function start_race(player, start_pos)
         start_pos = start_pos,
         checkpoints = {},
         checkpoint_seq = 0,
-        hud_id = nil,
+        hud_ids = {}, -- Store all HUD IDs
         last_node_pos = nil
     }
 
-    -- Initialize HUD
-    local hud = player:hud_add({
+    -- Initialize HUD elements
+    -- Orange text for "Time:"
+    local hud1 = player:hud_add({
         type = "text",
         position = { x = 0.5, y = 0.9 },
-        offset = { x = 0, y = -60 },
-        text = "Time: 00:00.000 | CP: 0",
-        number = FFA500,
-        alignment = { x = 0, y = 0 },
+        offset = { x = -140, y = -60 }, -- Increased offset to prevent overlap
+        text = "Time:",
+        number = 0xFFA500, -- Orange for text
+        alignment = { x = 1, y = 0 }, -- Right-align
         scale = { x = 100, y = 100 }
     })
-    if hud then
-        player_race_data[player_name].hud_id = hud
-        minetest.log("action", "[Parkour Race] HUD added for " .. player_name .. " with ID " .. hud)
-    else
-        minetest.log("error", "[Parkour Race] Failed to add HUD for " .. player_name)
-    end
+
+    -- White numbers for "00:00.000"
+    local hud2 = player:hud_add({
+        type = "text",
+        position = { x = 0.5, y = 0.9 },
+        offset = { x = -20, y = -60 }, -- Adjusted to align after "Time:"
+        text = "00:00.000",
+        number = 0xFFFFFF, -- White for numbers
+        alignment = { x = -1, y = 0 }, -- Left-align
+        scale = { x = 100, y = 100 }
+    })
+
+    -- Orange text for "| CP:"
+    local hud3 = player:hud_add({
+        type = "text",
+        position = { x = 0.5, y = 0.9 },
+        offset = { x = 40, y = -60 }, -- Adjusted to align after time
+        text = "CP:",
+        number = 0xFFA500, -- Orange for text
+        alignment = { x = -1, y = 0 }, -- Left-align
+        scale = { x = 100, y = 100 }
+    })
+
+    -- White number for "0"
+    local hud4 = player:hud_add({
+        type = "text",
+        position = { x = 0.5, y = 0.9 },
+        offset = { x = 70, y = -60 }, -- Adjusted to align after "| CP:"
+        text = "0",
+        number = 0xFFFFFF, -- White for numbers
+        alignment = { x = -1, y = 0 }, -- Left-align
+        scale = { x = 100, y = 100 }
+    })
+
+    -- Store all HUD IDs
+    player_race_data[player_name].hud_ids = {
+        time_label = hud1,
+        time_value = hud2,
+        cp_label = hud3,
+        cp_value = hud4
+    }
+    minetest.log("action", "[Parkour Race] HUD added for " .. player_name .. " with IDs: time_label=" .. hud1 .. ", time_value=" .. hud2 .. ", cp_label=" .. hud3 .. ", cp_value=" .. hud4)
 
     -- Give the player the teleport stick
     local inv = player:get_inventory()
@@ -271,15 +308,17 @@ local function start_race(player, start_pos)
     end
 
     local required_count = get_required_checkpoints_count()
-    minetest.chat_send_player(player_name, minetest.colorize("#FFA500", "Parkour race started! Reach all ") .. minetest.colorize("#FFFFFF", required_count) .. minetest.colorize("#FFA500", " required checkpoint(s) and the finish block. Optional checkpoints are bonus. Drop or left-click the teleport stick to reset to ") .. minetest.colorize("#FFA500", "last checkpoint") .. minetest.colorize("#FFA500", "."))
+    minetest.chat_send_player(player_name, minetest.colorize("#FFA500", "Parkour race started! Reach all ") .. minetest.colorize("#FFFFFF", required_count) .. minetest.colorize("#FFA500", " required checkpoint(s) and the finish block."))
+    minetest.chat_send_player(player_name, minetest.colorize("#FFA500", "Optional checkpoints are bonus. Drop or left-click the teleport stick to reset to last checkpoint."))
     minetest.log("action", "[Parkour Race] Race started for " .. player_name .. " at " .. minetest.pos_to_string(pos))
 end
+
 
 -- Function to update the HUD with elapsed time and checkpoint progress
 local function update_hud(player)
     local player_name = player:get_player_name()
     local data = player_race_data[player_name]
-    if data and data.start_time and data.hud_id then
+    if data and data.start_time and data.hud_ids then
         local status, err = pcall(function()
             local elapsed = os.clock() - data.start_time
             local req_count = 0
@@ -291,8 +330,10 @@ local function update_hud(player)
                     opt_count = opt_count + 1
                 end
             end
-            local checkpoint_text = "Req CP: " .. req_count .. "/" .. get_required_checkpoints_count() .. " | Opt CP: " .. opt_count
-            player:hud_change(data.hud_id, "text", "Time: " .. format_time(elapsed) .. " | " .. checkpoint_text)
+            -- Update time value (hud2)
+            player:hud_change(data.hud_ids.time_value, "text", format_time(elapsed))
+            -- Update checkpoint count (hud4)
+            player:hud_change(data.hud_ids.cp_value, "text", req_count .. "/" .. get_required_checkpoints_count())
         end)
         if not status then
             minetest.log("error", "[Parkour Race] HUD update failed for " .. player_name .. ": " .. err)
@@ -321,14 +362,17 @@ local function end_race(player)
 
     local elapsed = os.clock() - data.start_time
     local time_str = format_time(elapsed)
-    minetest.chat_send_all(minetest.colorize("#FFFF00", player_name ) .. minetest.colorize("#FFA500"," finished the parkour race in " ) .. minetest.colorize("#FFFFFF", time_str) .. minetest.colorize("#FFA500", "!"))
+    minetest.chat_send_all(minetest.colorize("#FFFFFF", player_name) .. minetest.colorize("#f55f5f", " finished the parkour race in ") .. minetest.colorize("#FFFFFF", time_str) .. minetest.colorize("#FFA500", "!"))
     minetest.log("action", "[Parkour Race] " .. player_name .. " finished race in " .. time_str .. " with " .. req_count .. " required and " .. opt_count .. " optional checkpoints")
 
     update_scoreboard(player_name, elapsed)
 
-    if data.hud_id then
+    -- Remove all HUD elements
+    if data.hud_ids then
         pcall(function()
-            player:hud_remove(data.hud_id)
+            for _, hud_id in pairs(data.hud_ids) do
+                player:hud_remove(hud_id)
+            end
         end)
     end
 
@@ -447,7 +491,7 @@ minetest.register_chatcommand("reset", {
             return false, minetest.colorize("#FFA500", "Player not found.")
         end
         teleport_to_last_checkpoint(player)
-        return true, minetest.colorize("#FF00FF", "Teleport command executed.")
+        return true
     end
 })
 
